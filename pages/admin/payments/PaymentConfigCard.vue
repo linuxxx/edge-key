@@ -1,0 +1,123 @@
+<template>
+  <section class="card bg-base-100 shadow-sm">
+    <div class="card-body space-y-4">
+      <div class="flex items-center justify-between gap-4 max-md:flex-col max-md:items-start">
+        <div>
+          <h1 class="text-2xl font-bold">{{ title }}</h1>
+          <p class="text-sm text-base-content/70">配置支付网关参数并控制该支付方式是否在前台展示。</p>
+        </div>
+        <label class="label cursor-pointer gap-3">
+          <span class="label-text font-medium">启用</span>
+          <input v-model="form.isEnabled" type="checkbox" class="toggle toggle-primary" />
+        </label>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="flex flex-col gap-1.5">
+          <span class="label-text font-medium">显示名称</span>
+          <input v-model="form.name" class="input input-bordered w-full" />
+        </label>
+        <label class="flex flex-col gap-1.5">
+          <span class="label-text font-medium">网关地址</span>
+          <input v-model="form.baseUrl" class="input input-bordered w-full" placeholder="https://example.com" />
+        </label>
+      </div>
+
+      <component :is="formMap[provider]" v-model="extraFields" />
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="flex flex-col gap-1.5">
+          <span class="label-text font-medium">Notify URL</span>
+          <input v-model="form.notifyUrl" class="input input-bordered w-full" placeholder="/api/payments/epay/notify" />
+        </label>
+        <label class="flex flex-col gap-1.5">
+          <span class="label-text font-medium">Return URL</span>
+          <input v-model="form.returnUrl" class="input input-bordered w-full" placeholder="/order/{orderNo}?token={token}" />
+        </label>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button class="btn btn-primary" :disabled="saving" @click="handleSave">
+          {{ saving ? '保存中...' : '保存配置' }}
+        </button>
+        <span v-if="saved" class="badge badge-success">已保存</span>
+        <span v-if="errorMessage" class="text-sm text-error">{{ errorMessage }}</span>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { reactive, ref } from "vue";
+import { normalizeTelefuncError } from "../../../lib/app-error";
+import { onSavePaymentConfig } from "./savePaymentConfig.telefunc";
+import BEpusdtForm from "./forms/BEpusdtForm.vue";
+import EpayForm from "./forms/EpayForm.vue";
+import type { PaymentProvider } from "../../../modules/payment/types";
+
+const formMap = { BEPUSDT: BEpusdtForm, EPAY: EpayForm };
+
+const emit = defineEmits<{ saved: [value: typeof props.initialValue] }>();
+
+const props = defineProps<{
+  provider: PaymentProvider;
+  title: string;
+  initialValue: {
+    provider: PaymentProvider;
+    name: string;
+    isEnabled: boolean;
+    baseUrl: string;
+    appId?: string;
+    appSecret?: string;
+    pid?: string;
+    key?: string;
+    notifyUrl?: string;
+    returnUrl?: string;
+  } | null;
+}>();
+
+const form = reactive({
+  name: props.initialValue?.name ?? (props.provider === 'BEPUSDT' ? 'USDT' : '聚合支付'),
+  isEnabled: props.initialValue?.isEnabled ?? false,
+  baseUrl: props.initialValue?.baseUrl ?? '',
+  notifyUrl: props.initialValue?.notifyUrl ?? '',
+  returnUrl: props.initialValue?.returnUrl ?? '',
+});
+
+const extraFields = reactive(
+  props.provider === 'BEPUSDT'
+    ? { appId: props.initialValue?.appId ?? '', appSecret: props.initialValue?.appSecret ?? '' }
+    : { pid: props.initialValue?.pid ?? '', key: props.initialValue?.key ?? '' }
+);
+
+const saving = ref(false);
+const saved = ref(false);
+const errorMessage = ref('');
+
+async function handleSave() {
+  saving.value = true;
+  saved.value = false;
+  errorMessage.value = '';
+  try {
+    const result = await onSavePaymentConfig({ provider: props.provider, ...form, ...extraFields });
+    form.name = result.name;
+    form.isEnabled = result.isEnabled;
+    form.baseUrl = result.baseUrl;
+    form.notifyUrl = result.notifyUrl ?? '';
+    form.returnUrl = result.returnUrl ?? '';
+    if (props.provider === 'BEPUSDT') {
+      (extraFields as any).appId = result.appId ?? '';
+      (extraFields as any).appSecret = result.appSecret ?? '';
+    } else {
+      (extraFields as any).pid = result.pid ?? '';
+      (extraFields as any).key = result.key ?? '';
+    }
+    saved.value = true;
+    emit('saved', { provider: props.provider, ...form, ...extraFields });
+  } catch (error) {
+    errorMessage.value = normalizeTelefuncError(error, '保存失败');
+  } finally {
+    saving.value = false;
+  }
+}
+</script>
